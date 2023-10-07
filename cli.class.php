@@ -13,18 +13,93 @@
 	 * Command line interface for Moody
 	 */
 	class CLI  {
+		private $command = null;
 		private $argv = array();
 		private $args = array();
 		private $inExecute = false;
+
+		private function printUsage() {
+			echo <<<HELP_END
+Moody CLI interpreter
+Usage: {$this->command} [OPTIONS...] [-o <output>] [-m] [--] [<input>] [<output>]
+
+Process a Moody/PHP file and apply minification and other optimizations to
+generate PHP code.
+
+Moody can parse PHP files using syntax features up to PHP 5.4. While Moody is
+usually used as a preprocessor for PHP files, it can also be used standalone as
+an interpreted language. See -m.
+
+When no file is given, read Moody/PHP code from standard input. In this case
+input is not available to Moody instructions. Note that code cannot be streamed
+in; the input is read fully before parsing and executing.
+
+Generated PHP code is written to standard output or a file (if -o <output> is
+given). Note that standard output may also contain text printed by Moody
+instructions. For backwards compatibility, output file can also be given as
+second argument.
+
+Options:
+  -m                    Enable Moody interpreter mode. Implies --silent.
+                        This sets -C requireinstructiondot=false so Moody
+                        instructions do not need the preceeding dot. Enabled
+                        automatically when input is a file and filename
+                        extension is "moody" or "mdy".
+  -o <output>           Write generated code to <output> instead of standard
+                        output. Convention is to use "cphp" extension for
+                        generated files.
+  --benchmark           Print time used to process file.
+  --silent              Do not print generated code to standard output. No
+                        effect when -o is given.
+  --dump                Not used, but accepted for backwards compatibility.
+
+  -h, -H, --help        Print help and exit.
+  -V, --version         Print version and exit.
+
+Moody VM options:
+  -C <config>=<value>   Set VM configuration <config> to <value>. Only valid
+                        values are "true" and "false". Note that Moody code can
+						override configuration.
+  -O[<level>]           Optimize generated code. These are aliases for certain
+                        VM configurations, where each level enables additional
+                        optimizations, which are listed below. Applied before
+                        individual -C options.
+                          -O0: No optimizations (This is the default)
+                          -O1, -O: Delete whitespace, comments and phpdoc
+                               -C deletewhitespaces=true
+                               -C deletecomments=true
+                          -O2: Also substitute symbols
+                               -C autosubstitutesymbols=true
+                          -O3: Also rename all variables
+                               -C compressvariables=true
+                               -C compressproperties=true
+                               This is potentially destructive; generated code
+                               may no longer work correctly if included into
+                               another PHP script.
+
+HELP_END;
+		}
+
+		private function usageError($msg) {
+			fwrite(\STDERR, $msg . \PHP_EOL);
+			exit(2);
+		}
 		
 		public function main($argv) {
-			$this->argv = $argv;
-			unset($this->argv[0], $argv);
-			
 			set_error_handler(array($this, 'errorHandler'));
 			
-			entry:
-			
+			$this->command = $argv[0];
+			$this->args = getopt('mo:hHVC:O::', array('benchmark', 'silent', 'dump', 'version', 'help'), $optind);
+			$this->argv = array_slice($argv, $optind);
+
+			if($this->args === false) {
+				$this->printUsage();
+				$this->usageError("Invalid parameters.");
+			} else if(isset($this->args['h']) || isset($this->args['H']) || isset($this->args['help'])) {
+				$this->printUsage();
+				exit;
+			}
+
 			/* Load moody.cphp */
 			if(!file_exists('moody.cphp')) {
 				if(file_exists('build.php') && is_readable('build.php')) {
@@ -58,63 +133,98 @@
 				if(in_array('Moody\TokenHandler', class_implements($class)))
 					$class::getInstance();
 			}
-			
+
 			/* Parse arguments */
-			foreach($this->argv as $arg) {
-				if(substr($arg, 0, 1) != '-')  {
-					if(isset($executeFile))
-						$destinationFile = $arg;
-					else
-						$executeFile = $arg;
-					break;
-				}
-			}
-			
-			$this->args = getopt("", array('benchmark', 'silent', 'dump'));
-			
-			if(isset($executeFile)) {
-				$source = $this->executeFile($executeFile);
-				
-				if($source === false)
-					exit;
-				
-				if(isset($destinationFile)) {
-					if(!file_put_contents($destinationFile, $source))
-						echo "Failed to put new source into destination file." . \PHP_EOL;
-				}
-				
-				if(isset($this->args['dump'])) {
-					echo \PHP_EOL . "Generated source: " . \PHP_EOL;
-					echo $source . \PHP_EOL;
-				}
-				
+			if(isset($this->args['V']) || isset($this->args['version'])) {
+				echo "Moody CLI Interpreter v" . MOODY_VERSION . \PHP_EOL;
+				echo "2012 Yussuf Khalil" . \PHP_EOL;
 				exit;
 			}
-			
-			echo "Moody CLI Interpreter v" . MOODY_VERSION . \PHP_EOL;
-			echo "2012 Yussuf Khalil" . \PHP_EOL;
-		}
-		
-		public function executeFile($fileName) {
-			if(!file_exists($fileName)) {
-				echo "File does not exist." . \PHP_EOL;
-				return false;
+
+			$moodymode = isset($this->args['m']);
+			$silent = $moodymode || isset($this->args['silent']);
+
+			if(isset($this->args['o']))
+				if(!is_string($this->args['o']) || !strlen($this->args['o']))
+					$this->usageError("Invalid parameter -o.");
+				else
+					$destinationFile = $this->args['o'];
+
+			foreach($this->argv as $arg) {
+				if(!isset($executeFile))
+					$executeFile = $arg;
+				else if(!isset($destinationFile))
+					$destinationFile = $arg;
+				else
+					$this->usageError("Trailing argument.");
 			}
-			
-			if(!is_readable($fileName)) {
-				echo "File is not readable." . \PHP_EOL;
-				return false;
+
+			/* Apply VM configuration */
+			Configuration::set('autosubstitutesymbols', false);
+
+			if(isset($this->args['O'])) {
+				if($this->args['O'] === false)
+					$this->args['O'] = '1';
+
+				switch($this->args['O']) {
+					case '3':
+						Configuration::set('compressvariables', true);
+						Configuration::set('compressproperties', true);
+					case '2':
+						Configuration::set('autosubstitutesymbols', true);
+					case '1':
+						Configuration::set('deletewhitespaces', true);
+						Configuration::set('deletecomments', true);
+					case '0':
+						break;
+					default:
+						$this->usageError("Invalid parameter -O.");
+				}
 			}
-			
-			$file = file_get_contents($fileName);
-			
-			if(substr($fileName, -3) == 'mdy' || substr($fileName, -5) == "moody") {
+
+			if(isset($this->args['C'])) {
+				$configs = is_array($this->args['C']) ? $this->args['C'] : array($this->args['C']);
+
+				foreach($configs as $config) {
+					if(!preg_match('~([a-z]+)=(true|false)$~i', $config, $matches))
+						$this->usageError("Invalid parameter -C.");
+
+					Configuration::set($matches[1], (bool) $matches[2]);
+				}
+			}
+
+			/* Load and execute file */
+			if(isset($executeFile)) {
+				if(!file_exists($executeFile))
+					$this->usageError("File does not exist.");
+				if(!is_readable($executeFile))
+					$this->usageError("File is not readable.");
+
+				if(substr($executeFile, -4) == '.mdy' || substr($executeFile, -6) == '.moody')
+					$moodymode = true;
+
+				$file = file_get_contents($executeFile);
+			} else {
+				$file = stream_get_contents(\STDIN);
+				fclose(\STDIN);
+			}
+
+			if($moodymode) {
 				Configuration::set("requireinstructiondot", false);
 				/* Satisfy the tokenizer */
 				$file = '<?php ' . $file . ' ?>';
 			}
+
+			$source = $this->executeSource($file, isset($executeFile) ? $executeFile : 'Standard Input', isset($executeFile));
 			
-			return $this->executeSource($file, $fileName, true);
+			if($source === false)
+				exit(1);
+
+			if(isset($destinationFile)) {
+				if(!file_put_contents($destinationFile, $source))
+					$this->usageError("Failed to write to output file.");
+			} else if(!$silent)
+				echo $source;
 		}
 		
 		public function executeSource($source, $origin = "Unknown", $appendT_EOF = false) {
@@ -175,7 +285,7 @@
 		}
 		
 		public function errorHandler($errType, $errStr, $errFile, $errLine) {
-			if($errType == E_DEPRECATED || $errType == E_STRICT)
+			if($errType == E_DEPRECATED || $errType == E_STRICT || $errType == E_NOTICE)
 				return false;
 
 			if($this->inExecute)
