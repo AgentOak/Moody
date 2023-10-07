@@ -1,4 +1,4 @@
-<?
+<?php
 // .config("deletewhitespaces", true) Set this to false to get human-readable code
 // .def("ABC", 7)
 // .ifdef("ABC")
