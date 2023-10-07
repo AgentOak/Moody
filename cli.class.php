@@ -76,6 +76,12 @@ Moody VM options:
                                may no longer work correctly if included into
                                another PHP script.
 
+Exit codes:
+  0 - Success.
+  1 - Error processing file. Details are printed to standard error.
+  2 - Invalid usage, input file not readable or output file not writable.
+  3 - moody.cphp is not available.
+
 HELP_END;
 		}
 
@@ -102,10 +108,10 @@ HELP_END;
 			/* Load moody.cphp */
 			if(!file_exists('moody.cphp')) {
 				if(file_exists('build.php') && is_readable('build.php')) {
-					echo "moody.cphp not found. Build from source now? (y/n) ";
+					fwrite(\STDERR, "moody.cphp not found. Build from source now? (y/n) ");
 					if(strtolower(fread(\STDIN, 1)) != 'y') {
-						echo "Aborting." . \PHP_EOL;
-						exit;
+						fwrite(\STDERR, "Aborting." . \PHP_EOL);
+						exit(3);
 					} else {
 						require_once 'build.php';
 						
@@ -113,14 +119,14 @@ HELP_END;
 						goto loaded;
 					}
 				} else {
-					echo "moody.cphp not found." . \PHP_EOL;
-					exit;
+					fwrite(\STDERR, "moody.cphp not found." . \PHP_EOL);
+					exit(3);
 				}
 			}
 			
 			if(!is_readable('moody.cphp')) {
-				echo "moody.cphp exists but is not readable." . \PHP_EOL;
-				exit;
+				fwrite(\STDERR, "moody.cphp exists but is not readable." . \PHP_EOL);
+				exit(3);
 			}
 			
 			require_once 'moody.cphp';
@@ -254,27 +260,19 @@ HELP_END;
 				
 				$vm = new TokenVM;
 				
-				$this->inExecute = true;
-				
 				if($this->benchmark)
 					$timeStart = microtime(true);
 				
+				$this->inExecute = true;
 				$tokenArray = $vm->execute($tokenArray);
+				$this->inExecute = false;
 				
 				if($this->benchmark)
-					echo "Script execution took " . ((microtime(true) - $timeStart) * 1000) . " ms." . \PHP_EOL;
+					fwrite(\STDERR, "Script execution took " . ((microtime(true) - $timeStart) * 1000) . " ms." . \PHP_EOL);
 				
-				$this->inExecute = false;
 				return $tokenArray;
 			} catch(\Exception $exception) {
-				if($this->benchmark)
-					$executionTime = (microtime(true) - $timeStart) * 1000;
-				
-				echo (string) $exception . \PHP_EOL;
-				
-				if($this->benchmark)
-					echo "Script execution took " . $executionTime . " ms." . \PHP_EOL;
-				
+				fwrite(\STDERR, (string) $exception . \PHP_EOL);
 				$this->inExecute = false;
 				return false;
 			}
