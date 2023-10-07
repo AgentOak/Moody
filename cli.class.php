@@ -14,8 +14,7 @@
 	 */
 	class CLI  {
 		private $command = null;
-		private $argv = array();
-		private $args = array();
+		private $benchmark = false;
 		private $inExecute = false;
 
 		private function printUsage() {
@@ -89,13 +88,13 @@ HELP_END;
 			set_error_handler(array($this, 'errorHandler'));
 			
 			$this->command = $argv[0];
-			$this->args = getopt('mo:hHVC:O::', array('benchmark', 'silent', 'dump', 'version', 'help'), $optind);
-			$this->argv = array_slice($argv, $optind);
+			$opts = getopt('mo:hHVC:O::', array('benchmark', 'silent', 'dump', 'version', 'help'), $optind);
+			$args = array_slice($argv, $optind);
 
-			if($this->args === false) {
+			if($opts === false) {
 				$this->printUsage();
 				$this->usageError("Invalid parameters.");
-			} else if(isset($this->args['h']) || isset($this->args['H']) || isset($this->args['help'])) {
+			} else if(isset($opts['h']) || isset($opts['H']) || isset($opts['help'])) {
 				$this->printUsage();
 				exit;
 			}
@@ -135,22 +134,22 @@ HELP_END;
 			}
 
 			/* Parse arguments */
-			if(isset($this->args['V']) || isset($this->args['version'])) {
+			if(isset($opts['V']) || isset($opts['version'])) {
 				echo "Moody CLI Interpreter v" . MOODY_VERSION . \PHP_EOL;
 				echo "2012 Yussuf Khalil" . \PHP_EOL;
 				exit;
 			}
 
-			$moodymode = isset($this->args['m']);
-			$silent = $moodymode || isset($this->args['silent']);
+			$moodymode = isset($opts['m']);
+			$this->benchmark = isset($opts['benchmark']);
 
-			if(isset($this->args['o']))
-				if(!is_string($this->args['o']) || !strlen($this->args['o']))
+			if(isset($opts['o']))
+				if(!is_string($opts['o']) || !strlen($opts['o']))
 					$this->usageError("Invalid parameter -o.");
 				else
-					$destinationFile = $this->args['o'];
+					$destinationFile = $opts['o'];
 
-			foreach($this->argv as $arg) {
+			foreach($args as $arg) {
 				if(!isset($executeFile))
 					$executeFile = $arg;
 				else if(!isset($destinationFile))
@@ -162,11 +161,11 @@ HELP_END;
 			/* Apply VM configuration */
 			Configuration::set('autosubstitutesymbols', false);
 
-			if(isset($this->args['O'])) {
-				if($this->args['O'] === false)
-					$this->args['O'] = '1';
+			if(isset($opts['O'])) {
+				if($opts['O'] === false)
+					$opts['O'] = '1';
 
-				switch($this->args['O']) {
+				switch($opts['O']) {
 					case '3':
 						Configuration::set('compressvariables', true);
 						Configuration::set('compressproperties', true);
@@ -182,8 +181,8 @@ HELP_END;
 				}
 			}
 
-			if(isset($this->args['C'])) {
-				$configs = is_array($this->args['C']) ? $this->args['C'] : array($this->args['C']);
+			if(isset($opts['C'])) {
+				$configs = is_array($opts['C']) ? $opts['C'] : array($opts['C']);
 
 				foreach($configs as $config) {
 					if(!preg_match('~([a-z]+)=(true|false)$~i', $config, $matches))
@@ -223,7 +222,7 @@ HELP_END;
 			if(isset($destinationFile)) {
 				if(!file_put_contents($destinationFile, $source))
 					$this->usageError("Failed to write to output file.");
-			} else if(!$silent)
+			} else if(!isset($opts['silent']) && !$moodymode)
 				echo $source;
 		}
 		
@@ -257,27 +256,24 @@ HELP_END;
 				
 				$this->inExecute = true;
 				
-				if(isset($this->args['benchmark'])) {
+				if($this->benchmark)
 					$timeStart = microtime(true);
-				}
 				
 				$tokenArray = $vm->execute($tokenArray);
 				
-				if(isset($this->args['benchmark'])) {
+				if($this->benchmark)
 					echo "Script execution took " . ((microtime(true) - $timeStart) * 1000) . " ms." . \PHP_EOL;
-				}
 				
 				$this->inExecute = false;
 				return $tokenArray;
 			} catch(\Exception $exception) {
-				if(isset($this->args['benchmark']))
+				if($this->benchmark)
 					$executionTime = (microtime(true) - $timeStart) * 1000;
 				
 				echo (string) $exception . \PHP_EOL;
 				
-				if(isset($this->args['benchmark'])) {
+				if($this->benchmark)
 					echo "Script execution took " . $executionTime . " ms." . \PHP_EOL;
-				}
 				
 				$this->inExecute = false;
 				return false;
